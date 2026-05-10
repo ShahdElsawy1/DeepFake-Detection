@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Deepfake Detector</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #1a0d14;
+    --surface: #251119;
+    --surface2: #301521;
+    --surface3: #3d1c2c;
+    --border: rgba(255,182,210,0.08);
+    --border2: rgba(255,182,210,0.18);
+    --text: #fce8f0;
+    --text2: #d49db5;
+    --text3: #8a5a70;
+    --accent: #f06292;
+    --accent2: #c2185b;
+    --real: #f48fb1;
+    --real-bg: rgba(244,143,177,0.1);
+    --fake: #e91e8c;
+    --fake-bg: rgba(233,30,140,0.1);
+    --uncertain: #f8bbd0;
+    --uncertain-bg: rgba(248,187,208,0.1);
+    --font: 'DM Sans', sans-serif;
+    --mono: 'DM Mono', monospace;
+  }
+
+  body {
+    background: var(--bg);
+    background-image: radial-gradient(ellipse at 20% 10%, rgba(240,98,146,0.12) 0%, transparent 50%),
+                      radial-gradient(ellipse at 80% 90%, rgba(194,24,91,0.10) 0%, transparent 50%);
+    color: var(--text);
+    font-family: var(--font);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 3rem 1.5rem;
+  }
+
+  /* Grid noise texture */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,182,210,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,182,210,0.025) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none; z-index: 0;
+  }
+
+  .page { position: relative; z-index: 1; width: 100%; max-width: 560px; }
+
+  /* Header */
+  .header { text-align: center; margin-bottom: 3rem; }
+  .logo {
+    display: inline-flex; align-items: center; gap: 10px;
+    background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: 100px; padding: 6px 16px 6px 10px;
+    font-size: 12px; color: var(--text2); margin-bottom: 1.5rem;
+    letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  .logo-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--real); box-shadow: 0 0 8px var(--real);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.85); }
+  }
+  h1 {
+    font-size: 2.4rem; font-weight: 600; letter-spacing: -0.03em;
+    background: linear-gradient(135deg, #fce8f0 0%, #f06292 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; margin-bottom: 0.6rem;
+  }
+  .tagline { font-size: 15px; color: var(--text2); line-height: 1.6; }
+
+  /* Upload card */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+  }
+
+  .drop-zone {
+    padding: 3rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: background 0.2s;
+    border: 2px dashed var(--border2);
+    border-radius: 16px;
+    margin: 1.5rem;
+    position: relative;
+  }
+  .drop-zone:hover { background: var(--surface2); border-color: var(--accent); }
+  .drop-zone.dragging { background: rgba(240,98,146,0.07); border-color: var(--accent); }
+  .drop-zone input[type=file] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+  }
+
+  .drop-icon {
+    width: 52px; height: 52px; border-radius: 14px;
+    background: var(--surface3); border: 1px solid var(--border2);
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 1rem; font-size: 22px;
+  }
+  .drop-title { font-size: 15px; font-weight: 500; margin-bottom: 5px; }
+  .drop-sub { font-size: 13px; color: var(--text3); }
+
+  /* Preview */
+  .preview-wrap { display: none; }
+  .preview-wrap.show { display: block; }
+
+  .img-container {
+    position: relative;
+    max-height: 340px; overflow: hidden;
+    border-radius: 0;
+  }
+  .img-container img {
+    width: 100%; max-height: 340px; object-fit: cover; display: block;
+  }
+  .img-overlay {
+    position: absolute; inset: 0;
+    background: linear-gradient(to bottom, transparent 60%, rgba(26,13,20,0.9) 100%);
+  }
+  .change-img {
+    position: absolute; top: 12px; right: 12px;
+    background: rgba(26,13,20,0.75); backdrop-filter: blur(8px);
+    border: 1px solid var(--border2); color: var(--text2);
+    border-radius: 8px; padding: 6px 12px; font-size: 12px;
+    font-family: var(--font); cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .change-img:hover { color: var(--text); border-color: var(--border2); }
+
+  /* Result area */
+  .result-area { padding: 1.5rem; }
+
+  .idle-hint {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 8px; padding: 1rem 0; color: var(--text3); font-size: 13px;
+  }
+
+  .scan-btn {
+    width: 100%; padding: 14px;
+    background: var(--accent); color: #fff;
+    border: none; border-radius: 12px;
+    font-family: var(--font); font-size: 15px; font-weight: 500;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+    transition: background 0.2s, transform 0.1s;
+  }
+  .scan-btn:hover { background: var(--accent2); }
+  .scan-btn:active { transform: scale(0.98); }
+  .scan-btn:disabled { background: var(--surface3); color: var(--text3); cursor: not-allowed; transform: none; }
+
+  /* Analyzing state */
+  .analyzing {
+    display: none; align-items: center; gap: 12px;
+    padding: 1rem 0; color: var(--text2); font-size: 14px;
+  }
+  .analyzing.show { display: flex; }
+  .spinner {
+    width: 20px; height: 20px; border-radius: 50%;
+    border: 2px solid var(--border2);
+    border-top-color: var(--accent);
+    animation: spin 0.7s linear infinite; flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .scan-progress { flex: 1; }
+  .scan-label { font-size: 13px; font-weight: 500; color: var(--text); }
+  .scan-sub { font-size: 12px; color: var(--text3); margin-top: 2px; }
+
+  /* Verdict */
+  .verdict-card {
+    display: none; border-radius: 14px; padding: 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .verdict-card.show { display: block; }
+  .verdict-card.real { background: var(--real-bg); border: 1px solid rgba(62,207,142,0.25); }
+  .verdict-card.fake { background: var(--fake-bg); border: 1px solid rgba(247,96,79,0.25); }
+  .verdict-card.uncertain { background: var(--uncertain-bg); border: 1px solid rgba(245,166,35,0.25); }
+
+  .verdict-top { display: flex; align-items: center; gap: 12px; margin-bottom: 1rem; }
+  .verdict-badge {
+    width: 44px; height: 44px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0;
+  }
+  .verdict-badge.real { background: rgba(62,207,142,0.15); }
+  .verdict-badge.fake { background: rgba(247,96,79,0.15); }
+  .verdict-badge.uncertain { background: rgba(245,166,35,0.15); }
+  .verdict-name { font-size: 20px; font-weight: 600; }
+  .verdict-name.real { color: var(--real); }
+  .verdict-name.fake { color: var(--fake); }
+  .verdict-name.uncertain { color: var(--uncertain); }
+  .verdict-desc { font-size: 13px; color: var(--text2); margin-top: 2px; }
+
+  /* Confidence bar */
+  .conf-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text3); margin-bottom: 6px; }
+  .conf-val { font-family: var(--mono); font-weight: 500; color: var(--text2); }
+  .conf-track {
+    height: 6px; border-radius: 3px; background: rgba(255,182,210,0.08); overflow: hidden;
+  }
+  .conf-fill { height: 100%; border-radius: 3px; width: 0%; transition: width 0.8s cubic-bezier(0.4,0,0.2,1); }
+  .conf-fill.real { background: var(--real); }
+  .conf-fill.fake { background: var(--fake); }
+  .conf-fill.uncertain { background: var(--uncertain); }
+
+  /* Stats grid */
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 1rem; }
+  .stat {
+    background: rgba(255,182,210,0.03); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px;
+  }
+  .stat-label { font-size: 11px; color: var(--text3); margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat-value { font-size: 13px; font-weight: 500; font-family: var(--mono); color: var(--text); }
+
+  /* Error */
+  .error-box {
+    display: none; background: rgba(247,96,79,0.08); border: 1px solid rgba(247,96,79,0.2);
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 1rem;
+    font-size: 13px; color: var(--fake); line-height: 1.5;
+  }
+  .error-box.show { display: block; }
+
+  /* Tips */
+  .tips {
+    margin-top: 2rem;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  }
+  .tip {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 1rem;
+  }
+  .tip-icon { font-size: 18px; margin-bottom: 6px; }
+  .tip-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+  .tip-text { font-size: 11px; color: var(--text3); line-height: 1.5; }
+
+  /* Footer */
+  .footer { text-align: center; margin-top: 2.5rem; font-size: 12px; color: var(--text3); }
+  .footer span { color: var(--text2); font-family: var(--mono); }
+
+  @media (max-width: 480px) {
+    h1 { font-size: 1.8rem; }
+    .tips { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="header">
+    <div class="logo"><div class="logo-dot"></div> EfficientNetB0 Model</div>
+    <h1>Deepfake Detector</h1>
+    <p class="tagline">Upload a face image — the model will classify it as real or AI-generated in seconds.</p>
+  </div>
+
+  <div class="card">
+    <!-- Drop zone -->
+    <div class="drop-zone" id="dropZone">
+      <input type="file" id="fileInput" accept="image/*" />
+      <div class="drop-icon">🖼️</div>
+      <div class="drop-title">Drop an image here or click to upload</div>
+      <div class="drop-sub">Supports JPG · PNG · WEBP — face images work best</div>
+    </div>
+
+    <!-- Preview -->
+    <div class="preview-wrap" id="previewWrap">
+      <div class="img-container">
+        <img id="previewImg" src="" alt="Uploaded image" />
+        <div class="img-overlay"></div>
+        <button class="change-img" id="changeBtn">↩ Change image</button>
+      </div>
+
+      <div class="result-area">
+
+        <div class="error-box" id="errorBox"></div>
+
+        <!-- Idle state -->
+        <div class="idle-hint" id="idleHint">
+          <span>Ready to analyze</span>
+        </div>
+
+        <!-- Analyzing state -->
+        <div class="analyzing" id="analyzingState">
+          <div class="spinner"></div>
+          <div class="scan-progress">
+            <div class="scan-label">Running inference...</div>
+            <div class="scan-sub">Preprocessing → EfficientNetB0 → Sigmoid output</div>
+          </div>
+        </div>
+
+        <!-- Verdict card -->
+        <div class="verdict-card" id="verdictCard">
+          <div class="verdict-top">
+            <div class="verdict-badge" id="verdictBadge"></div>
+            <div>
+              <div class="verdict-name" id="verdictName"></div>
+              <div class="verdict-desc" id="verdictDesc"></div>
+            </div>
+          </div>
+          <div class="conf-row">
+            <span>Confidence</span>
+            <span class="conf-val" id="confVal">—</span>
+          </div>
+          <div class="conf-track"><div class="conf-fill" id="confFill"></div></div>
+          <div class="stats">
+            <div class="stat">
+              <div class="stat-label">Raw probability</div>
+              <div class="stat-value" id="rawProb">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Verdict</div>
+              <div class="stat-value" id="verdictRaw">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Model</div>
+              <div class="stat-value">EfficientNetB0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Input size</div>
+              <div class="stat-value">224 × 224</div>
+            </div>
+          </div>
+        </div>
+
+        <button class="scan-btn" id="scanBtn" disabled>
+          🔍 Analyze Image
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tips">
+    <div class="tip">
+      <div class="tip-icon">🎯</div>
+      <div class="tip-title">Use clear faces</div>
+      <div class="tip-text">The model was trained on face images — frontal portraits yield the most accurate results.</div>
+    </div>
+    <div class="tip">
+      <div class="tip-icon">📐</div>
+      <div class="tip-title">Resolution matters</div>
+      <div class="tip-text">Images are resized to 224×224. High-res inputs preserve more detail for the model.</div>
+    </div>
+    <div class="tip">
+      <div class="tip-icon">⚖️</div>
+      <div class="tip-title">Confidence score</div>
+      <div class="tip-text">Higher confidence means the model is more certain. Below 70% treat as uncertain.</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Model: <span>EfficientNetB0</span> &nbsp;·&nbsp; Backend: <span>Flask @ :5050</span> &nbsp;·&nbsp; Threshold: <span>0.5</span>
+  </div>
+</div>
+
+<script>
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const previewWrap = document.getElementById('previewWrap');
+const previewImg = document.getElementById('previewImg');
+const changeBtn = document.getElementById('changeBtn');
+const scanBtn = document.getElementById('scanBtn');
+const idleHint = document.getElementById('idleHint');
+const analyzingState = document.getElementById('analyzingState');
+const verdictCard = document.getElementById('verdictCard');
+const errorBox = document.getElementById('errorBox');
+
+const API = 'http://localhost:5050';
+let currentFile = null;
+
+function showError(msg) {
+  errorBox.textContent = '⚠️ ' + msg;
+  errorBox.classList.add('show');
+  setAnalyzing(false);
+  scanBtn.disabled = false;
+  scanBtn.textContent = '🔍 Re-analyze';
+}
+function hideError() { errorBox.classList.remove('show'); }
+
+function setAnalyzing(on) {
+  analyzingState.classList.toggle('show', on);
+  idleHint.style.display = on ? 'none' : 'flex';
+  verdictCard.classList.remove('show');
+  scanBtn.disabled = on;
+}
+
+function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  currentFile = file;
+  const reader = new FileReader();
+  reader.onload = e => {
+    previewImg.src = e.target.result;
+    dropZone.style.display = 'none';
+    previewWrap.classList.add('show');
+    verdictCard.classList.remove('show');
+    idleHint.style.display = 'flex';
+    hideError();
+    scanBtn.disabled = false;
+    scanBtn.innerHTML = '🔍 Analyze Image';
+  };
+  reader.readAsDataURL(file);
+}
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragging'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragging'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragging'); loadFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
+
+changeBtn.addEventListener('click', () => {
+  dropZone.style.display = '';
+  previewWrap.classList.remove('show');
+  verdictCard.classList.remove('show');
+  hideError();
+  fileInput.value = '';
+  currentFile = null;
+});
+
+scanBtn.addEventListener('click', async () => {
+  if (!currentFile) return;
+  hideError();
+  setAnalyzing(true);
+  scanBtn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-width:2px;margin-right:0"></div> Analyzing...';
+
+  try {
+    // Read file as base64
+    const base64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(',')[1]);
+      r.onerror = rej;
+      r.readAsDataURL(currentFile);
+    });
+
+    const resp = await fetch(`${API}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64 })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `Server error ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    setAnalyzing(false);
+    renderResult(data);
+  } catch (err) {
+    showError(err.message || 'Failed to connect to the backend. Make sure the Flask server is running on port 5050.');
+  }
+});
+
+function renderResult(data) {
+  const verdict = (data.verdict || 'UNCERTAIN').toUpperCase();
+  const conf = parseFloat(data.confidence) || 0;
+  const rawProb = parseFloat(data.raw_probability) || 0;
+
+  const cls = verdict === 'REAL' ? 'real' : verdict === 'FAKE' ? 'fake' : 'uncertain';
+  const icons = { real: '✅', fake: '🚨', uncertain: '⚠️' };
+  const descs = {
+    real: `The model classifies this as a genuine photograph with ${conf.toFixed(1)}% confidence.`,
+    fake: `The model detects this as AI-generated or manipulated with ${conf.toFixed(1)}% confidence.`,
+    uncertain: `The model cannot confidently classify this image. Review manually.`
+  };
+
+  verdictCard.className = `verdict-card show ${cls}`;
+  document.getElementById('verdictBadge').className = `verdict-badge ${cls}`;
+  document.getElementById('verdictBadge').textContent = icons[cls];
+  document.getElementById('verdictName').className = `verdict-name ${cls}`;
+  document.getElementById('verdictName').textContent = verdict === 'REAL' ? 'Real Image' : verdict === 'FAKE' ? 'Deepfake / Fake' : 'Uncertain';
+  document.getElementById('verdictDesc').textContent = descs[cls];
+  document.getElementById('confVal').textContent = conf.toFixed(1) + '%';
+  document.getElementById('rawProb').textContent = rawProb.toFixed(4);
+  document.getElementById('verdictRaw').textContent = verdict;
+
+  const fill = document.getElementById('confFill');
+  fill.className = `conf-fill ${cls}`;
+  fill.style.width = '0%';
+  setTimeout(() => { fill.style.width = conf + '%'; }, 60);
+
+  idleHint.style.display = 'none';
+  scanBtn.disabled = false;
+  scanBtn.innerHTML = '🔄 Re-analyze';
+}
+</script>
+</body>
+</html>
